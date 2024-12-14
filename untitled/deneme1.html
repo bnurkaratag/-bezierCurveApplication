@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bezier Eğrisine Uygulamalar</title>
+  <style>
+    body {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+      background-color: #f0f0f0;
+    }
+    canvas {
+      border: 1px solid black;
+      cursor: pointer;
+      margin-bottom: 20px;
+    }
+    .controls {
+      display: flex;
+      justify-content: center;
+    }
+    button {
+      margin: 5px;
+      padding: 10px;
+      font-size: 16px;
+    }
+    .distance {
+      margin-top: 20px;
+      font-size: 18px;
+      font-weight: normal;
+    }
+    .slider-container {
+      margin-top: 20px;
+      display: flex;
+      align-items: center;
+    }
+    input[type="range"] {
+      margin-left: 10px;
+      width: 300px;
+    }
+    select {
+      margin-left: 10px;
+    }
+  </style>
+</head>
+<body>
+<canvas id="bezierCanvas" width="800" height="600"></canvas>
+<div class="controls">
+  <button id="playButton">Play</button>
+  <button id="pauseButton">Pause</button>
+  <button id="resetButton">Reset</button>
+  <button id="resetForcesButton">Kuvvetleri Sıfırla</button>
+</div>
+<div class="distance">
+  Kat Edilen Mesafe: <span id="distanceDisplay">0</span>
+</div>
+<div class="slider-container">
+  <label for="gravitySlider">Yerçekimi Kuvveti:</label>
+  <input id="gravitySlider" type="range" min="0" max="9.8" step="0.01" value="0">
+  <span id="gravityValue">0</span>
+</div>
+<div class="slider-container">
+  <label for="windSlider">Rüzgar Hızı:</label>
+  <input id="windSlider" type="range" min="0" max="10" step="0.01" value="0">
+  <span id="windValue">0</span>
+</div>
+<div class="slider-container">
+  <label for="windDirection">Rüzgar Yönü:</label>
+  <select id="windDirection">
+    <option value="right">Doğu (E)</option>
+    <option value="left">Batı (W)</option>
+    <option value="up">Kuzey (N)</option>
+    <option value="down">Güney (S)</option>
+  </select>
+</div>
+<div class="slider-container">
+  <label for="vortexStrengthSlider">Girdap Kuvvet Gücü:</label>
+  <input id="vortexStrengthSlider" type="range" min="0" max="0.1" step="0.01" value="0">
+  <span id="vortexStrengthValue">0</span>
+</div>
+<div class="controls">
+  <button id="gravityEarthButton">Dünya</button>
+  <button id="gravityMoonButton">Ay</button>
+  <button id="gravityMarsButton">Mars</button>
+</div>
+<script>
+  const canvas = document.getElementById("bezierCanvas");
+  const ctx = canvas.getContext("2d");
+
+  let controlPoints = [
+    { x: 100, y: 500 },
+    { x: 300, y: 100 },
+    { x: 500, y: 100 },
+    { x: 700, y: 500 }
+  ];
+  let initialControlPoints = JSON.parse(JSON.stringify(controlPoints));
+  let selectedPoint = null;
+  let t = 0;
+  let lastPosition = null;
+  let totalDistance = 0;
+  let animationId;
+  let isAnimating = false;
+  let gravity = 0;
+  let wind = 0;
+  let windDirection = "right";
+  let vortexCenter = { x: 400, y: 300 }; // Girdap merkezi
+  let vortexStrength = 0;  // Başlangıçta 0 yapıldı
+
+  const gravitySlider = document.getElementById("gravitySlider");
+  const gravityValue = document.getElementById("gravityValue");
+  const windSlider = document.getElementById("windSlider");
+  const windValue = document.getElementById("windValue");
+  const windDirectionSelect = document.getElementById("windDirection");
+  const vortexStrengthSlider = document.getElementById("vortexStrengthSlider");
+  const vortexStrengthValue = document.getElementById("vortexStrengthValue");
+
+  gravitySlider.addEventListener("input", () => {
+    gravity = parseFloat(gravitySlider.value);
+    gravityValue.textContent = gravity.toFixed(2);
+  });
+
+  windSlider.addEventListener("input", () => {
+    wind = parseFloat(windSlider.value);
+    windValue.textContent = wind.toFixed(2);
+  });
+
+  windDirectionSelect.addEventListener("change", () => {
+    windDirection = windDirectionSelect.value;
+  });
+
+  vortexStrengthSlider.addEventListener("input", () => {
+    vortexStrength = parseFloat(vortexStrengthSlider.value);
+    vortexStrengthValue.textContent = vortexStrength.toFixed(2);
+  });
+
+  canvas.addEventListener('mousedown', (e) => {
+    const mousePos = getMousePos(e);
+    selectedPoint = getSelectedControlPoint(mousePos);
+  });
+
+  canvas.addEventListener('mousemove', (e) => {
+    if (selectedPoint) {
+      const mousePos = getMousePos(e);
+      selectedPoint.x = mousePos.x;
+      selectedPoint.y = mousePos.y;
+      draw();
+    }
+  });
+
+  canvas.addEventListener('mouseup', () => {
+    selectedPoint = null;
+  });
+
+  function getMousePos(e) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    };
+  }
+
+  function getSelectedControlPoint(mousePos) {
+    return controlPoints.find(point =>
+      Math.abs(point.x - mousePos.x) < 10 && Math.abs(point.y - mousePos.y) < 10
+    );
+  }
+
+  function cubicBezier(t) {
+    const x = Math.pow(1 - t, 3) * controlPoints[0].x +  3 * Math.pow(1 - t, 2) * t * controlPoints[1].x +
+      3 * (1 - t) * Math.pow(t, 2) * controlPoints[2].x + Math.pow(t, 3) * controlPoints[3].x;
+
+    const y = Math.pow(1 - t, 3) * controlPoints[0].y + 3 * Math.pow(1 - t, 2) * t * controlPoints[1].y +
+      3 * (1 - t) * Math.pow(t, 2) * controlPoints[2].y + Math.pow(t, 3) * controlPoints[3].y;
+
+    return { x, y };
+  }
+
+  function applyForces() {
+    controlPoints.forEach((point, index) => {
+      if (index !== 0 && index !== controlPoints.length - 1) {
+        // Rüzgar kuvveti
+        if (windDirection === "right") point.x += wind;
+        else if (windDirection === "left") point.x -= wind;
+        else if (windDirection === "up") point.y -= wind;
+        else if (windDirection === "down") point.y += wind;
+
+        // Yerçekimi kuvveti
+        point.y += gravity;
+
+        // Girdap kuvveti
+        const dx = point.x - vortexCenter.x;
+        const dy = point.y - vortexCenter.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        const radialForceX = -vortexStrength * dx / distance;
+        const radialForceY = -vortexStrength * dy / distance;
+
+        const tangentialForceX = vortexStrength * -dy;
+        const tangentialForceY = vortexStrength * dx;
+
+        point.x += radialForceX + tangentialForceX;
+        point.y += radialForceY + tangentialForceY;
+      }
+    });
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "blue";
+    controlPoints.forEach((point, index) => {
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "black";
+      ctx.fillText(`P${index}`, point.x + 10, point.y - 10);
+    });
+    ctx.strokeStyle = "red";
+    ctx.beginPath();
+    for (let i = 0; i <= 1; i += 0.01) {
+      const { x, y } = cubicBezier(i);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    const { x, y } = cubicBezier(t);
+    ctx.fillStyle = "red";
+    ctx.beginPath();
+    ctx.arc(x, y, 10, 0, Math.PI * 2);
+    ctx.fill();
+    if (lastPosition) {
+      totalDistance += calculateDistance(lastPosition, { x, y });
+    }
+    lastPosition = { x, y };
+    document.getElementById("distanceDisplay").innerText = totalDistance.toFixed(2);
+  }
+
+  function calculateDistance(p1, p2) {
+    return Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+  }
+  function startAnimation() {
+    if (!isAnimating) {
+      isAnimating = true;
+      animate();
+    }
+  }
+  function stopAnimation() {
+    cancelAnimationFrame(animationId);
+    isAnimating = false;
+  }
+  function resetAnimation() {
+    stopAnimation();
+    t = 0;
+    lastPosition = null;
+    totalDistance = 0;
+    document.getElementById("distanceDisplay").innerText = "0";
+    draw();
+  }
+  function resetForces() {
+    controlPoints = JSON.parse(JSON.stringify(initialControlPoints));
+    gravitySlider.value = 0;
+    windSlider.value = 0;
+    vortexStrengthSlider.value = 0;  // Burada da sıfır yapıldı
+    gravityValue.textContent = "0.00";
+    windValue.textContent = "0.00";
+    vortexStrengthValue.textContent = "0.00";  // Burada da sıfır
+    windDirectionSelect.value = "right";
+    draw();
+  }
+
+  function animate() {
+    if (t < 1) {
+      t += 0.001;
+      applyForces();
+      draw();
+      animationId = requestAnimationFrame(animate);
+    } else {
+      stopAnimation();
+    }
+  }
+
+  // Butonlara tıklama
+  document.getElementById("playButton").addEventListener("click", startAnimation);
+  document.getElementById("pauseButton").addEventListener("click", stopAnimation);
+  document.getElementById("resetButton").addEventListener("click", resetAnimation);
+  document.getElementById("resetForcesButton").addEventListener("click", resetForces);
+
+  document.getElementById("gravityEarthButton").addEventListener("click", () => {
+    gravity = 9.8;
+    gravitySlider.value = gravity;
+    gravityValue.textContent = gravity.toFixed(2);
+  });
+
+  document.getElementById("gravityMoonButton").addEventListener("click", () => {
+    gravity = 1.625;
+    gravitySlider.value = gravity;
+    gravityValue.textContent = gravity.toFixed(2);
+  });
+
+  document.getElementById("gravityMarsButton").addEventListener("click", () => {
+    gravity = 3.721;
+    gravitySlider.value = gravity;
+    gravityValue.textContent = gravity.toFixed(2);
+  });
+
+  draw();  // Initial draw
+</script>
+</body>
+</html>
+
